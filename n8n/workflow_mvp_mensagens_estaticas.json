@@ -1,0 +1,192 @@
+{
+  "name": "Assistente de Investimentos - MVP (mensagens estáticas)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "9b1ca40a-e6a2-444f-9b9a-ac178e395ca1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "9869de37-2002-4815-bf39-280c302ccfc1"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.clientes",
+        "options": {}
+      },
+      "id": "c2860ca8-8749-4a29-8f33-0038a4f4370e",
+      "name": "Separar clientes",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/GhilhermeAlves/dio-lab-assistente-investimentos-rpa-n8n/main/docs/data.csv",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "09a273e0-98e2-49c5-b901-71f46ff4f289",
+      "name": "HTTP - Buscar investimentos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code 1 - Organizar investimentos\n// Recebe o CSV como texto e transforma em uma tabela (1 item por investimento)\nconst csv = $input.first().json.data;\nconst [cabecalho, ...linhas] = csv.trim().split(/\\r?\\n/);\nconst colunas = cabecalho.split(',').map(c => c.trim());\n\nreturn linhas\n  .filter(l => l.trim())\n  .map(linha => {\n    const valores = linha.split(',').map(v => v.trim());\n    const inv = Object.fromEntries(colunas.map((c, i) => [c, valores[i]]));\n    const minimo = Number(inv.minimo);\n\n    return {\n      json: {\n        perfil: inv.perfil,\n        produto: inv.produto,\n        minimo,\n        minimo_formatado: minimo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),\n        rentabilidade: inv.rentabilidade\n      }\n    };\n  });"
+      },
+      "id": "6fa88fbd-0648-4d1b-bd0c-d5ff7f299274",
+      "name": "Code 1 - Organizar investimentos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "perfil",
+        "joinMode": "keepMatches",
+        "options": {
+          "multipleMatches": "all"
+        }
+      },
+      "id": "78b9342c-4143-4c2d-9382-5ed71a06fdb2",
+      "name": "Merge - Clientes + Investimentos",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        760,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code 2 - Mensagens personalizadas\n// Do Merge vem cada cliente junto com os investimentos do seu perfil (match por \"perfil\").\n// Para cada cliente escolhemos o investimento que cabe no saldo e criamos a mensagem.\nconst paraNumero = (txt) => Number(String(txt).replace(/[^\\d,]/g, '').replace(',', '.')) || 0;\n\nconst templates = {\n  Conservador: (c) => `Olá, ${c.nome}! Como seu perfil é Conservador, priorizamos segurança e renda fixa. Com seu saldo de ${c.saldo}, recomendamos ${c.produto} (rentabilidade ${c.rentabilidade}, aplicação mínima ${c.minimo_formatado}): baixo risco e previsibilidade para seu dinheiro.`,\n  Moderado: (c) => `Olá, ${c.nome}! Seu perfil Moderado busca equilíbrio entre renda fixa e variável. Com seu saldo de ${c.saldo}, sugerimos ${c.produto} (rentabilidade ${c.rentabilidade}, aplicação mínima ${c.minimo_formatado}) para diversificar com risco controlado.`,\n  Arrojado: (c) => `Olá, ${c.nome}! Como investidor Arrojado, você busca maior potencial de retorno. Com seu saldo de ${c.saldo}, indicamos ${c.produto} (rentabilidade ${c.rentabilidade}, aplicação mínima ${c.minimo_formatado}), com foco em renda variável e crescimento no longo prazo.`\n};\n\n// 1) Agrupar os matches por cliente (email)\nconst porCliente = {};\nfor (const item of $input.all()) {\n  const linha = { ...item.json, saldo_numerico: paraNumero(item.json.saldo) };\n  (porCliente[linha.email] ||= []).push(linha);\n}\n\n// 2) Maior aplicação mínima que cabe no saldo; se nenhuma couber, a menor\nreturn Object.values(porCliente).map(opcoes => {\n  const cabem = opcoes.filter(o => o.minimo <= o.saldo_numerico).sort((a, b) => b.minimo - a.minimo);\n  const c = cabem[0] || opcoes.sort((a, b) => a.minimo - b.minimo)[0];\n\n  return {\n    json: {\n      nome: c.nome,\n      email: c.email,\n      saldo: c.saldo,\n      perfil: c.perfil,\n      investimento: c.produto,\n      rentabilidade: c.rentabilidade,\n      mensagem: templates[c.perfil]\n        ? templates[c.perfil](c)\n        : `Olá, ${c.nome}! Ainda não temos uma recomendação para o perfil \"${c.perfil}\".`\n    }\n  };\n});"
+      },
+      "id": "fa3ef46b-9642-4d0e-9e2f-679ac3504e49",
+      "name": "Code 2 - Mensagens personalizadas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'finalizado', total_clientes: $input.all().length, mensagens: $input.all().map(i => i.json) }) }}",
+        "options": {}
+      },
+      "id": "77b79fea-f810-47a5-a07e-0b647f370931",
+      "name": "Responder ao Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1240,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Separar clientes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP - Buscar investimentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar clientes": {
+      "main": [
+        [
+          {
+            "node": "Merge - Clientes + Investimentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Buscar investimentos": {
+      "main": [
+        [
+          {
+            "node": "Code 1 - Organizar investimentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code 1 - Organizar investimentos": {
+      "main": [
+        [
+          {
+            "node": "Merge - Clientes + Investimentos",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge - Clientes + Investimentos": {
+      "main": [
+        [
+          {
+            "node": "Code 2 - Mensagens personalizadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code 2 - Mensagens personalizadas": {
+      "main": [
+        [
+          {
+            "node": "Responder ao Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

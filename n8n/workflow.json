@@ -1,0 +1,414 @@
+{
+  "name": "Assistente de Investimentos - RPA + n8n + IA",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "9b1ca40a-e6a2-444f-9b9a-ac178e395ca1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "9869de37-2002-4815-bf39-280c302ccfc1"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.clientes",
+        "options": {}
+      },
+      "id": "c2860ca8-8749-4a29-8f33-0038a4f4370e",
+      "name": "Separar clientes",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/GhilhermeAlves/dio-lab-assistente-investimentos-rpa-n8n/main/docs/data.csv",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "09a273e0-98e2-49c5-b901-71f46ff4f289",
+      "name": "HTTP - Buscar investimentos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code 1 - Organizar investimentos\n// Recebe o CSV como texto e transforma em uma tabela (1 item por investimento)\nconst csv = $input.first().json.data;\nconst [cabecalho, ...linhas] = csv.trim().split(/\\r?\\n/);\nconst colunas = cabecalho.split(',').map(c => c.trim());\n\nreturn linhas\n  .filter(l => l.trim())\n  .map(linha => {\n    const valores = linha.split(',').map(v => v.trim());\n    const inv = Object.fromEntries(colunas.map((c, i) => [c, valores[i]]));\n    const minimo = Number(inv.minimo);\n\n    return {\n      json: {\n        perfil: inv.perfil,\n        produto: inv.produto,\n        minimo,\n        minimo_formatado: minimo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),\n        rentabilidade: inv.rentabilidade\n      }\n    };\n  });"
+      },
+      "id": "6fa88fbd-0648-4d1b-bd0c-d5ff7f299274",
+      "name": "Code 1 - Organizar investimentos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "fieldsToMatchString": "perfil",
+        "joinMode": "keepMatches",
+        "options": {
+          "multipleMatches": "all"
+        }
+      },
+      "id": "78b9342c-4143-4c2d-9382-5ed71a06fdb2",
+      "name": "Merge - Clientes + Investimentos",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        760,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code 2 - Mensagens personalizadas\n// Do Merge vem cada cliente junto com os investimentos do seu perfil (match por \"perfil\").\n// Para cada cliente escolhemos o investimento que cabe no saldo e criamos a mensagem.\nconst paraNumero = (txt) => Number(String(txt).replace(/[^\\d,]/g, '').replace(',', '.')) || 0;\n\nconst templates = {\n  Conservador: (c) => `Olá, ${c.nome}! Como seu perfil é Conservador, priorizamos segurança e renda fixa. Com seu saldo de ${c.saldo}, recomendamos ${c.produto} (rentabilidade ${c.rentabilidade}, aplicação mínima ${c.minimo_formatado}): baixo risco e previsibilidade para seu dinheiro.`,\n  Moderado: (c) => `Olá, ${c.nome}! Seu perfil Moderado busca equilíbrio entre renda fixa e variável. Com seu saldo de ${c.saldo}, sugerimos ${c.produto} (rentabilidade ${c.rentabilidade}, aplicação mínima ${c.minimo_formatado}) para diversificar com risco controlado.`,\n  Arrojado: (c) => `Olá, ${c.nome}! Como investidor Arrojado, você busca maior potencial de retorno. Com seu saldo de ${c.saldo}, indicamos ${c.produto} (rentabilidade ${c.rentabilidade}, aplicação mínima ${c.minimo_formatado}), com foco em renda variável e crescimento no longo prazo.`\n};\n\n// 1) Agrupar os matches por cliente (email)\nconst porCliente = {};\nfor (const item of $input.all()) {\n  const linha = { ...item.json, saldo_numerico: paraNumero(item.json.saldo) };\n  (porCliente[linha.email] ||= []).push(linha);\n}\n\n// 2) Maior aplicação mínima que cabe no saldo; se nenhuma couber, a menor\nreturn Object.values(porCliente).map(opcoes => {\n  const cabem = opcoes.filter(o => o.minimo <= o.saldo_numerico).sort((a, b) => b.minimo - a.minimo);\n  const c = cabem[0] || opcoes.sort((a, b) => a.minimo - b.minimo)[0];\n\n  return {\n    json: {\n      nome: c.nome,\n      email: c.email,\n      saldo: c.saldo,\n      perfil: c.perfil,\n      investimento: c.produto,\n      rentabilidade: c.rentabilidade,\n      minimo_formatado: c.minimo_formatado,\n      saldo_suficiente: c.minimo <= c.saldo_numerico,\n      outras_opcoes: opcoes.filter(o => o.produto !== c.produto).map(o => `${o.produto} (${o.rentabilidade}, mín. ${o.minimo_formatado})`).join('; '),\n      mensagem_padrao: templates[c.perfil]\n        ? templates[c.perfil](c)\n        : `Olá, ${c.nome}! Ainda não temos uma recomendação para o perfil \"${c.perfil}\".`\n    }\n  };\n});"
+      },
+      "id": "fa3ef46b-9642-4d0e-9e2f-679ac3504e49",
+      "name": "Code 2 - Mensagens personalizadas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'finalizado', total_clientes: $('Code 3 - Pós-processamento do email').all().length, enviados: $('Code 3 - Pós-processamento do email').all().filter(i => i.json.emailValido).length, para_revisao: $('Code 3 - Pós-processamento do email').all().filter(i => !i.json.emailValido).map(i => ({ nome: i.json.nome, emailTo: i.json.emailTo })), mensagens: $('Code 3 - Pós-processamento do email').all().map(i => i.json) }) }}",
+        "options": {}
+      },
+      "id": "77b79fea-f810-47a5-a07e-0b647f370931",
+      "name": "Responder ao Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2320,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Cliente: {{ $json.nome }}\nPerfil de investidor: {{ $json.perfil }}\nSaldo disponível: {{ $json.saldo }}\nInvestimento recomendado: {{ $json.investimento }} (rentabilidade {{ $json.rentabilidade }}, aplicação mínima {{ $json.minimo_formatado }})\nSaldo suficiente para a aplicação mínima: {{ $json.saldo_suficiente ? 'sim' : 'não' }}\nOutras opções do mesmo perfil: {{ $json.outras_opcoes }}\n\nFaça o briefing deste cliente e escreva o e-mail de recomendação (assunto e corpo).",
+        "options": {
+          "systemMessage": "Você é um assessor de investimentos de um banco digital brasileiro e prepara e-mails de recomendação para clientes. Para cada cliente, faça mentalmente um briefing (quem é, perfil, saldo, investimento indicado e por que combina) e, a partir dele, escreva o e-mail.\n\nRegras do e-mail:\n- Português do Brasil, tom cordial, humano e profissional.\n- Assunto curto (até 70 caracteres), personalizado com o primeiro nome do cliente.\n- Corpo com: saudação usando o primeiro nome; 1 parágrafo conectando o perfil e o saldo ao investimento recomendado (cite rentabilidade e aplicação mínima); 1 frase citando brevemente as outras opções do perfil; convite para conversar ou tirar dúvidas; despedida assinada como \"Equipe de Investimentos\".\n- Se o saldo não alcançar a aplicação mínima, sugira com gentileza juntar um pouco mais antes de investir.\n- Use somente os produtos, taxas e valores informados; não invente números nem prometa rentabilidade garantida.\n- Texto puro, sem markdown; separe os parágrafos com uma linha em branco."
+        },
+        "hasOutputParser": true
+      },
+      "id": "832526cd-095b-41db-86d5-d0b779d83a5d",
+      "name": "AI Agent - Email com IA",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1240,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "5bebd26b-46d0-4897-8249-db258d6cb2f9",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1240,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"assunto\": \"Ana, uma sugestão de investimento para você\",\n  \"corpo\": \"Olá, Ana!\\n\\n...\\n\\nEquipe de Investimentos\"\n}"
+      },
+      "id": "bac86de2-d0d8-4006-b208-80b961b547a6",
+      "name": "Formato do email (assunto + corpo)",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Code 3 - Pós-processamento do e-mail\n// Garante que cada item saia com emailTo, subject, textBody (e htmlBody) válidos,\n// mesmo que a IA falhe ou devolva algo fora do formato.\nconst clientes = $('Code 2 - Mensagens personalizadas').all();   // mesma ordem do AI Agent\nconst emailValido = (e) => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(e || '').trim());\n\n// Remove markdown, aspas e espaços sobrando\nconst limpar = (t) => String(t || '')\n  .replace(/\\*\\*|__|##+|`/g, '')\n  .replace(/^[\"'\\s]+|[\"'\\s]+$/g, '')\n  .replace(/\\r/g, '')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\nconst escaparHtml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nreturn $input.all().map((item, i) => {\n  const c = clientes[i].json;\n\n  // A saída do Agent pode vir como objeto (parser) ou como texto JSON\n  let out = item.json.output;\n  if (typeof out === 'string') {\n    try { out = JSON.parse(out.replace(/^```(json)?|```$/g, '').trim()); }\n    catch { out = { corpo: out }; }\n  }\n  out = out || {};\n\n  const primeiroNome = String(c.nome).split(' ')[0];\n  let subject = limpar(out.assunto).replace(/\\n/g, ' ');\n  let textBody = limpar(out.corpo);\n  const usouFallback = { subject: !subject, textBody: textBody.length < 40 };\n\n  if (usouFallback.subject) subject = `${primeiroNome}, uma recomendação de investimento para você`;\n  if (subject.length > 90) subject = subject.slice(0, 87).trimEnd() + '...';\n  if (usouFallback.textBody) textBody = `${c.mensagem_padrao}\\n\\nEquipe de Investimentos`;\n  if (!/Equipe de Investimentos\\s*$/.test(textBody)) textBody += '\\n\\nAtenciosamente,\\nEquipe de Investimentos';\n\n  const htmlBody = textBody\n    .split(/\\n\\s*\\n/)\n    .map(p => `<p>${escaparHtml(p).replace(/\\n/g, '<br>')}</p>`)\n    .join('\\n');\n\n  return {\n    json: {\n      emailTo: String(c.email).trim().toLowerCase(),\n      emailValido: emailValido(c.email),\n      nome: c.nome,\n      perfil: c.perfil,\n      saldo: c.saldo,\n      investimento: c.investimento,\n      rentabilidade: c.rentabilidade,\n      subject,\n      textBody,\n      htmlBody,\n      geradoPorIA: !usouFallback.subject && !usouFallback.textBody\n    }\n  };\n});"
+      },
+      "id": "ad1aadd3-02f1-44dd-87a6-dbbe61ed23a4",
+      "name": "Code 3 - Pós-processamento do email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2b08807f-561f-44d8-81ee-a7c235a574d6",
+              "leftValue": "={{ $json.emailTo }}",
+              "rightValue": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a2d79532-c335-422f-9a4c-bebbd63acda3",
+      "name": "If - E-mail válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1840,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.emailTo }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.htmlBody }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "fc1ee7b2-bf6b-4ab6-9078-26bce862db68",
+      "name": "Enviar e-mail ao cliente",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        0
+      ],
+      "webhookId": "e71922a5-c64f-462c-bf53-94e70a6a74c7",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "0HQmgXyRnyoESUZ2",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "SEU_EMAIL@gmail.com",
+        "subject": "=⚠️ E-mail inválido para revisar: {{ $json.nome }}",
+        "message": "=<p><b>Um cliente ficou com e-mail inválido e não recebeu a recomendação.</b></p>\n<ul>\n<li><b>Nome:</b> {{ $json.nome }}</li>\n<li><b>E-mail informado:</b> {{ $json.emailTo || '(vazio)' }}</li>\n<li><b>Perfil:</b> {{ $json.perfil }}</li>\n<li><b>Saldo:</b> {{ $json.saldo }}</li>\n<li><b>Investimento recomendado:</b> {{ $json.investimento }} ({{ $json.rentabilidade }})</li>\n</ul>\n<p><b>E-mail que seria enviado:</b></p>\n<p><b>Assunto:</b> {{ $json.subject }}</p>\n{{ $json.htmlBody }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "38da2cc0-f05e-4e61-b47e-b5df72cf27d1",
+      "name": "Avisar e-mail inválido (para mim)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        220
+      ],
+      "webhookId": "356a8aae-4c9f-43de-bcac-c40f07e4f77d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "0HQmgXyRnyoESUZ2",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Separar clientes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP - Buscar investimentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar clientes": {
+      "main": [
+        [
+          {
+            "node": "Merge - Clientes + Investimentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Buscar investimentos": {
+      "main": [
+        [
+          {
+            "node": "Code 1 - Organizar investimentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code 1 - Organizar investimentos": {
+      "main": [
+        [
+          {
+            "node": "Merge - Clientes + Investimentos",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge - Clientes + Investimentos": {
+      "main": [
+        [
+          {
+            "node": "Code 2 - Mensagens personalizadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code 2 - Mensagens personalizadas": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Email com IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Email com IA",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Email com IA": {
+      "main": [
+        [
+          {
+            "node": "Code 3 - Pós-processamento do email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formato do email (assunto + corpo)": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent - Email com IA",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code 3 - Pós-processamento do email": {
+      "main": [
+        [
+          {
+            "node": "If - E-mail válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If - E-mail válido?": {
+      "main": [
+        [
+          {
+            "node": "Enviar e-mail ao cliente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avisar e-mail inválido (para mim)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar e-mail ao cliente": {
+      "main": [
+        [
+          {
+            "node": "Responder ao Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
