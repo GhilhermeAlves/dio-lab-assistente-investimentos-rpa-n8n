@@ -15,7 +15,7 @@ O pipeline coleta dados de clientes em uma página web (RPA com Python), envia e
 | Workflow completo com Agente de IA | ✅ | [`n8n/workflow.json`](n8n/workflow.json) |
 | Script de RPA integrado ao Webhook do n8n | ✅ | [`rpa/extrair_clientes.ipynb`](rpa/extrair_clientes.ipynb) |
 | Mensagens geradas dinamicamente via LLM | ✅ | nó *AI Agent - Email com IA* (Gemini 2.5 Flash) |
-| Prints do fluxo de ponta a ponta | ✅ | [`docs/prints/`](docs/prints/) |
+| Demonstração de ponta a ponta | ✅ | saídas salvas no [notebook](rpa/extrair_clientes.ipynb) e prints em [`docs/prints/`](docs/prints/) |
 | Documentação das decisões técnicas | ✅ | este README |
 
 ---
@@ -94,7 +94,7 @@ Clientes com e-mail inválido não recebem envio automático. O responsável rec
 O Webhook usa *Respond to Webhook*. Assim, ao final da execução o Colab recebe a confirmação (`status: finalizado`) e os e-mails gerados, o que fecha o ciclo de ponta a ponta.
 
 **10. Segurança.**
-A URL real do Webhook **não** fica versionada no repositório: o notebook usa um *placeholder* e aceita a variável de ambiente `N8N_WEBHOOK`. Como o fluxo envia e-mails por uma conta Gmail, deixar a URL pública permitiria disparos por terceiros. O e-mail de revisão no `workflow.json` também é um *placeholder* (`SEU_EMAIL@gmail.com`).
+O notebook usa a *Test URL* do Webhook, que só aceita chamadas enquanto o editor do n8n está em modo de escuta. A *Production URL* não é publicada: como o fluxo envia e-mails por uma conta Gmail, deixá-la pública permitiria disparos por terceiros. O e-mail de revisão no `workflow.json` exportado é um *placeholder* (`SEU_EMAIL@gmail.com`).
 
 ---
 
@@ -105,7 +105,7 @@ A URL real do Webhook **não** fica versionada no repositório: o notebook usa u
    - Configure a credencial do **Gmail** nos dois nós de envio e troque `SEU_EMAIL@gmail.com` pelo e-mail que vai receber os avisos de revisão.
    - Os e-mails da página de exemplo são fictícios. Para testar o envio, use o seu próprio endereço ou desative o nó *Enviar e-mail ao cliente*.
 2. **Webhook**: copie a *Test URL* do nó Webhook e clique em **Execute workflow**, ou publique o workflow e use a *Production URL*.
-3. **Colab**: abra o [`rpa/extrair_clientes.ipynb`](rpa/extrair_clientes.ipynb), cole a URL em `N8N_WEBHOOK` e execute todas as células.
+3. **Colab**: abra o [`rpa/extrair_clientes.ipynb`](rpa/extrair_clientes.ipynb), cole a URL em `WEBHOOK_URL` e execute todas as células.
 4. O notebook imprime o status e os e-mails gerados para cada cliente.
 
 Para a versão MVP (sem IA), importe o [`n8n/workflow_mvp_mensagens_estaticas.json`](n8n/workflow_mvp_mensagens_estaticas.json). Ele usa templates fixos por perfil:
@@ -118,7 +118,9 @@ Para a versão MVP (sem IA), importe o [`n8n/workflow_mvp_mensagens_estaticas.js
 
 ## 📸 Demonstração
 
-Prints da execução de ponta a ponta em [`docs/prints/`](docs/prints/):
+A execução completa está registrada nas **saídas do notebook** [`rpa/extrair_clientes.ipynb`](rpa/extrair_clientes.ipynb): os 10 clientes extraídos da página, o status `finalizado` devolvido pelo n8n e os e-mails gerados pela IA para cada cliente (`IA: True`).
+
+Prints da execução em [`docs/prints/`](docs/prints/):
 
 - Workflow completo no n8n executado com sucesso.
 - Saída do Merge (clientes × investimentos).
